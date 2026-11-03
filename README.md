@@ -15,3 +15,4 @@ A native Python desktop recreation of the CAPRICORN cyberpunk wallpaper.
 3. Run: `python main.py`
 
 *(Press `Escape` to close the app, press `Space` to trigger a glitch)*
+assets taken from моя милая модель's Workshop in STEAM 
