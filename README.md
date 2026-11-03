@@ -1,6 +1,6 @@
 # CAPRION / NEON PROTOCOL (Tkinter Edition)
 
-A native Python desktop recreation of the CAPRION cyberpunk wallpaper.
+A native Python desktop recreation of the CAPRICORN cyberpunk wallpaper.
 
 ## Features
 - Real-time system audio visualizer (using `soundcard` and `numpy`)
