@@ -17,5 +17,8 @@
  "musicmood": true,
  "eventrate": 50,
  "sfx": true,
- "sfxvolume": 60
+ "sfxvolume": 0,
+ "musicfile": "",
+ "musicdir": "",
+ "musicvolume": 50
 }

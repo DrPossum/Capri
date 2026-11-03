@@ -1,0 +1,53 @@
+"""Run this to find out why music is silent:  python music_test.py   (or:  py music_test.py)"""
+import os, sys, time
+here = os.path.dirname(os.path.abspath(__file__))
+folder = os.path.join(here, "music")
+exts = (".mp3", ".mpeg", ".mpg", ".mpga", ".mp2", ".wav", ".ogg", ".flac")
+files = [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.lower().endswith(exts)] if os.path.isdir(folder) else []
+if len(sys.argv) > 1:
+    files = [sys.argv[1]]
+print("Python", sys.version.split()[0])
+print("Music folder:", folder)
+print("Audio files found:", files or "NONE  <- put your file here (or run: python music_test.py C:\\path\\song.mp3)")
+if not files:
+    input("\nPress Enter..."); sys.exit()
+f = files[0]
+print("Size of", os.path.basename(f), "=", os.path.getsize(f), "bytes")
+
+print("\n--- TEST 1: pygame ---")
+try:
+    import pygame
+    print("pygame", pygame.version.ver)
+    pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+    print("mixer ok:", pygame.mixer.get_init())
+    pygame.mixer.music.load(f)
+    pygame.mixer.music.set_volume(1.0)
+    pygame.mixer.music.play()
+    print("Playing for 5 seconds... can you hear it?")
+    time.sleep(5)
+    print("still busy:", pygame.mixer.music.get_busy())
+    pygame.mixer.music.stop()
+except Exception as e:
+    print("pygame FAILED:", repr(e), "\n  -> try: pip install pygame")
+
+if sys.platform == "win32":
+    print("\n--- TEST 2: Windows media player (MCI) ---")
+    import ctypes
+    def mci(cmd):
+        err = ctypes.windll.winmm.mciSendStringW(cmd, None, 0, 0)
+        if err:
+            b = ctypes.create_unicode_buffer(256)
+            ctypes.windll.winmm.mciGetErrorStringW(err, b, 256)
+            print("  ", cmd, "->", b.value)
+        return err
+    mci("close t")
+    if mci('open "%s" type mpegvideo alias t' % f) and mci('open "%s" alias t' % f):
+        print("MCI could not open the file")
+    else:
+        mci("setaudio t volume to 1000")
+        mci("play t")
+        print("Playing for 5 seconds... can you hear it?")
+        time.sleep(5)
+        mci("close t")
+print("\nIf neither test is audible: check Windows volume mixer (python / pythonw not muted) and the output device.")
+input("Press Enter to close...")

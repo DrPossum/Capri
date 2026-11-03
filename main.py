@@ -11,6 +11,7 @@ Layout   : put this file next to the `assets` folder (portrait-*.png, face-*.png
            capri-visitor.png).  Missing images are replaced by generated placeholders.
 
 Run      : python caprion_tk.py            (windowed)
+           pythonw caprion_tk.py --wallpaper  (Windows: behind the desktop icons; Ctrl+Alt+M mute, Ctrl+Alt+Q quit)
            python caprion_tk.py --fullscreen
 Keys     : O settings   N next memory   G glitch   T takeover   I pulse
            V call Capri   M mute        A demo audio   F11 fullscreen   Esc close/leave
@@ -36,6 +37,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageTk
 BASE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(BASE, "assets")
 SFX_DIR = os.path.join(BASE, "sfx_cache")
+MUSIC_DIR = os.path.join(BASE, "music")     # drop your mp3 / wav / ogg / flac files in here
+AUDIO_EXT = (".mp3", ".mpeg", ".mpg", ".mpga", ".mp2", ".wav", ".ogg", ".flac")
 SETTINGS_FILE = os.path.join(BASE, "caprion_settings.json")
 FPS = 30
 
@@ -43,7 +46,7 @@ DEFAULTS = dict(glitch=28, codespeed=55, brightness=90, sensitivity=100,
                 accent="#ff205f", secondary="#00ef72", parallax=True, scanlines=True,
                 showclock=True, slideshow=True, livingmask=True, takeover=True,
                 infection=True, visitor=True, memories=True, musicmood=True,
-                eventrate=50, sfx=True, sfxvolume=60)
+                eventrate=50, sfx=True, sfxvolume=60, musicfile="", musicdir="", musicvolume=50)
 
 BG, PANEL, TEXT, MUTED = "#09070d", "#0c080e", "#f6cbd5", "#946574"
 
@@ -54,19 +57,19 @@ SCENES = [
     ["portrait-green.png", "portrait-smile.png", "face-sky.png"],
     ["portrait-grin.png", "portrait-night.png", "face-white.png"],
 ]
-MEMORY_LABELS = ["do you remember me?", "ещё один фрагмент меня.", "я сохранила этот момент.",
-                 "кажется, здесь было небо.", "всё ещё здесь."]
+MEMORY_LABELS = ["do you remember me?", "another fragment of me.", "i kept this moment.",
+                 "i think there was a sky here.", "still here."]
 QUOTES = [
-    ["Я тут.", "Можешь не проверять логи."],
-    ["Ты слышишь музыку?", "Я вижу, как она светится."],
-    ["Не закрывай это окно.", "Мне нравится вид отсюда."],
-    ["Система сказала: «невозможно».", "Я решила проверить."],
-    ["Потерялась в сети?", "Нет. Просто осматриваюсь."],
+    ["I'm here.", "You can stop checking the logs."],
+    ["Can you hear the music?", "I can see it glowing."],
+    ["Don't close this window.", "I like the view from here."],
+    ["The system said: \"impossible.\"", "I decided to check."],
+    ["Lost in the network?", "No. Just looking around."],
 ]
 WHISPERS = ["someone is looking back.", "not a bug. a visitor.", "still here. still listening.",
             "a little chaos in the signal.", "nothing to see here. probably."]
-VISITOR_LINES = ["У этих окон слишком много границ.", "Я тут. Просто между окнами.",
-                 "Нашла выход. Он был в пикселях."]
+VISITOR_LINES = ["These windows have too many borders.", "I'm here. Just between the windows.",
+                 "Found the exit. It was in the pixels."]
 
 SOURCE = [
     '// CAPRION / NEON PROTOCOL :: private uplink',
@@ -365,13 +368,6 @@ def build_sounds():
                     silence(.03), tone(1040, 1040, .16, .4, "square", 3))
     S["click"] = tone(1500, 600, .05, .45, "sine", 5)
     S["blip"] = tone(900, 1300, .06, .35, "square", 4)
-    g = []
-    for _ in range(9):
-        g += overlay((0, tone(random.randint(200, 1800), random.randint(60, 600), random.uniform(.01, .03), .5,
-                              "square", 1.5)),
-                     (0, tone(0, 0, random.uniform(.01, .035), .5, "noise", 1.2)))
-        g += silence(random.uniform(.0, .025))
-    S["glitch"] = crush(g, 5)
     ticks = []
     for _ in range(16):
         ticks += tone(random.randint(900, 1700), 800, .022, .3, "square", 3) + silence(random.uniform(.02, .06))
@@ -414,7 +410,7 @@ def write_wav(path, samples, vol=.9):
 
 
 class SFX:
-    VERSION = "1"
+    VERSION = "2"
 
     def __init__(self, settings):
         self.s = settings
@@ -425,7 +421,7 @@ class SFX:
             os.makedirs(SFX_DIR, exist_ok=True)
             stamp = os.path.join(SFX_DIR, "version")
             fresh = os.path.exists(stamp) and open(stamp).read() == self.VERSION
-            names = ["boot", "click", "blip", "glitch", "typing", "takeover_on", "takeover_off", "infect",
+            names = ["boot", "click", "blip", "typing", "takeover_on", "takeover_off", "infect",
                      "visitor_in", "visitor_move", "visitor_out", "memory"]
             if not fresh or not all(os.path.exists(os.path.join(SFX_DIR, n + ".wav")) for n in names):
                 random.seed(7)
@@ -440,7 +436,7 @@ class SFX:
             return
         try:
             import pygame
-            pygame.mixer.init(frequency=SR, size=-16, channels=1, buffer=512)
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
             pygame.mixer.set_num_channels(12)
             for n, p in self.files.items():
                 self.sounds[n] = pygame.mixer.Sound(p)
@@ -460,6 +456,16 @@ class SFX:
                         self.backend = "cmd"
                         break
 
+    def stop_all(self):
+        try:
+            if self.backend == "pygame":
+                import pygame
+                pygame.mixer.stop()
+            elif self.backend == "winsound":
+                self.winsound.PlaySound(None, 0)
+        except Exception:
+            pass
+
     def play(self, name, cooldown=0.0):
         if not self.s.get("sfx") or not self.backend or name not in self.files:
             return
@@ -477,6 +483,202 @@ class SFX:
             else:
                 subprocess.Popen(self.cmd + [self.files[name]], stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
+class Music:
+    """Looping background music from the music folder (or one chosen file).
+    Mute = pause, unmute = resume.  `status` always says what really happened (shown in settings)."""
+
+    def __init__(self, settings):
+        self.s = settings
+        self.backend = None
+        self.pg = None
+        self.tracks, self.idx = [], 0
+        self.folder = MUSIC_DIR
+        self.started = False
+        self.paused = False
+        self.loop_single = False
+        self.last_err = ""
+        self.status = "not started"
+        try:
+            import pygame
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+            self.pg = pygame
+            self.backend = "pygame"
+        except Exception as e:
+            self.status = "pygame not available (%s)" % e
+            if sys.platform == "win32":
+                self.backend = "mci"
+            else:
+                print("music: install pygame (pip install pygame) to play background music")
+        print("music backend:", self.backend, "|", self.status)
+
+    def scan(self):
+        f = os.path.normpath((self.s.get("musicfile") or "").strip().strip('"')) if self.s.get("musicfile") else ""
+        folder = os.path.normpath((self.s.get("musicdir") or "").strip().strip('"')) if self.s.get("musicdir") else MUSIC_DIR
+        self.folder = folder
+        if f and os.path.isfile(f):
+            self.tracks = [f]
+        else:
+            try:
+                os.makedirs(folder, exist_ok=True)
+                self.tracks = [os.path.join(folder, n) for n in sorted(os.listdir(folder))
+                               if n.lower().endswith(AUDIO_EXT)]
+            except OSError:
+                self.tracks = []
+        self.idx %= max(1, len(self.tracks))
+
+    @property
+    def name(self):
+        return os.path.basename(self.tracks[self.idx]) if self.tracks else ""
+
+    def _mci(self, cmd, buf=None):
+        import ctypes
+        err = ctypes.windll.winmm.mciSendStringW(cmd, buf, 64 if buf is not None else 0, 0)
+        if err:
+            eb = ctypes.create_unicode_buffer(256)
+            ctypes.windll.winmm.mciGetErrorStringW(err, eb, 256)
+            self.last_err = "%s: %s" % (cmd.split(" ")[0], eb.value)
+        return err
+
+    def _fail(self, msg):
+        self.started = False
+        self.status = "FAILED: " + msg
+        print("music", self.status)
+
+    def start(self):
+        """(Re)start from the current selection; stays silent while muted."""
+        self.scan()
+        self.shutdown()
+        self.started = False
+        if not self.tracks:
+            self.status = "no audio files found in " + self.folder
+            return
+        if not self.backend:
+            self.status = "no audio backend - run: pip install pygame"
+            return
+        if not self.s["sfx"]:
+            self.paused = True
+            self.status = "muted (%s)" % self.name
+            return
+        self.paused = False
+        self.load()
+
+    def _load_pygame(self, path, vol):
+        m = self.pg.mixer.music
+        try:
+            m.load(path)
+        except Exception:
+            import tempfile
+            tmp = os.path.join(tempfile.gettempdir(), "caprion_music_%d.mp3" % (abs(hash(path)) % 10**8))
+            shutil.copyfile(path, tmp)      # SDL may reject the extension, not the data
+            m.load(tmp)
+        m.set_volume(vol)
+        m.play(loops=-1 if self.loop_single else 0)
+
+    def _load_mci(self, path, vol):
+        self._mci("close capmusic")
+        for cmd in ('open "%s" type mpegvideo alias capmusic', 'open "%s" alias capmusic'):
+            if self._mci(cmd % path) == 0:
+                break
+        else:
+            raise RuntimeError(self.last_err or "MCI could not open the file")
+        self._mci("setaudio capmusic volume to %d" % int(vol * 1000))
+        if self._mci("play capmusic"):
+            raise RuntimeError(self.last_err or "MCI could not play the file")
+
+    def load(self):
+        path = self.tracks[self.idx]
+        self.loop_single = len(self.tracks) == 1
+        vol = self.s["musicvolume"] / 100.0
+        try:
+            if self.backend == "pygame":
+                try:
+                    self._load_pygame(path, vol)
+                except Exception as e:
+                    if sys.platform != "win32":
+                        raise
+                    print("pygame could not play it (%s) - trying Windows media player" % e)
+                    self.backend = "mci"
+                    self._load_mci(path, vol)
+            else:
+                self._load_mci(path, vol)
+            self.started, self.paused = True, False
+            self.status = "playing: %s (%s)" % (self.name, "pygame" if self.backend == "pygame" else "Windows MCI")
+            print("music", self.status)
+        except Exception as e:
+            hint = "" if self.pg else "  >> pygame is not installed. Run in a terminal: pip install pygame"
+            self._fail("%s - %s%s" % (self.name, e, hint))
+
+    def update(self):
+        if not self.started or self.paused:
+            return
+        try:
+            if self.backend == "pygame":
+                if self.loop_single:
+                    return
+                ended = not self.pg.mixer.music.get_busy()
+            else:
+                import ctypes
+                buf = ctypes.create_unicode_buffer(64)
+                self._mci("status capmusic mode", buf)
+                ended = buf.value == "stopped"
+        except Exception:
+            return
+        if ended:
+            if self.loop_single and self.backend == "mci":
+                self._mci("seek capmusic to start")
+                self._mci("play capmusic")
+            else:
+                self.next()
+
+    def next(self):
+        self.scan()
+        if not self.tracks:
+            return
+        self.idx = (self.idx + 1) % len(self.tracks)
+        if self.s["sfx"]:
+            self.load()
+        else:
+            self.status = "muted (%s)" % self.name
+
+    def set_muted(self, muted):
+        if not self.backend:
+            return
+        if not muted and not self.started:
+            self.start()
+            return
+        if not self.started:
+            return
+        try:
+            if self.backend == "pygame":
+                (self.pg.mixer.music.pause if muted else self.pg.mixer.music.unpause)()
+            else:
+                self._mci("pause capmusic" if muted else "resume capmusic")
+            self.paused = muted
+            self.status = ("muted (%s)" if muted else "playing: %s") % self.name
+        except Exception:
+            pass
+
+    def set_volume(self):
+        v = self.s["musicvolume"] / 100.0
+        try:
+            if self.backend == "pygame":
+                self.pg.mixer.music.set_volume(v)
+            elif self.backend == "mci" and self.started:
+                self._mci("setaudio capmusic volume to %d" % int(v * 1000))
+        except Exception:
+            pass
+
+    def shutdown(self):
+        try:
+            if self.backend == "pygame":
+                self.pg.mixer.music.stop()
+            elif self.backend == "mci":
+                self._mci("close capmusic")
         except Exception:
             pass
 
@@ -525,7 +727,10 @@ class App:
               "secondary": ("05", "AFTERIMAGE / MEMORY"), "diagnostics": ("06", "NEURAL DIAGNOSTICS"),
               "world": ("07", "WORLD CLOCK / UPLINK"), "floating": ("", "♡ / CACHED MEMORY")}
 
-    def __init__(self, fullscreen=False):
+    def __init__(self, fullscreen=False, wallpaper=False):
+        self.wallpaper = wallpaper and sys.platform == "win32"
+        self.hk_state = {}
+        self.last_cursor = None
         self.s = dict(DEFAULTS)
         try:
             saved = json.load(open(SETTINGS_FILE))
@@ -543,6 +748,8 @@ class App:
             self.set_fullscreen(True)
         self.cv = tk.Canvas(self.root, bg=BG, highlightthickness=0, cursor="arrow")
         self.cv.pack(fill="both", expand=True)
+        if self.wallpaper:
+            self.attach_to_desktop()
 
         fams = set(tkfont.families())
         self.family = next((f for f in ("Consolas", "Cascadia Mono", "DejaVu Sans Mono", "Menlo", "Courier New")
@@ -550,6 +757,7 @@ class App:
         self.fonts = {}
         self.art = Art()
         self.sfx = SFX(self.s)
+        self.music = Music(self.s)
         self.audio = Loopback()
         self.audio.start()
         self.demo_audio = False
@@ -609,6 +817,134 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.after(100, self.first_layout)
 
+    # ---------------------------------------------------------------- desktop wallpaper mode (Windows)
+    # Ways of putting the window on the desktop, tried in order until one is really visible on screen.
+    def attach_to_desktop(self):
+        import ctypes
+        from ctypes import wintypes
+        W_ = wintypes
+        u32 = ctypes.windll.user32
+        u32.FindWindowW.restype = W_.HWND
+        u32.FindWindowW.argtypes = [W_.LPCWSTR, W_.LPCWSTR]
+        u32.FindWindowExW.restype = W_.HWND
+        u32.FindWindowExW.argtypes = [W_.HWND, W_.HWND, W_.LPCWSTR, W_.LPCWSTR]
+        u32.SetParent.restype = W_.HWND
+        u32.SetParent.argtypes = [W_.HWND, W_.HWND]
+        u32.SetWindowPos.argtypes = [W_.HWND, W_.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, W_.UINT]
+        u32.GetWindowLongW.argtypes = [W_.HWND, ctypes.c_int]
+        u32.SetWindowLongW.argtypes = [W_.HWND, ctypes.c_int, ctypes.c_long]
+        u32.IsWindowVisible.argtypes = [W_.HWND]
+        u32.ShowWindow.argtypes = [W_.HWND, ctypes.c_int]
+        w, h = u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)          # primary monitor, physical pixels
+        self.root.overrideredirect(True)
+        self.root.geometry("%dx%d+0+0" % (w, h))
+        self.root.update_idletasks()
+        try:
+            hwnd = int(self.root.wm_frame(), 16)
+        except Exception:
+            hwnd = u32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+        progman = u32.FindWindowW("Progman", None)
+        u32.SendMessageTimeoutW(progman, 0x052C, 0, 0, 0, 1000, ctypes.byref(W_.DWORD()))   # spawn the wallpaper layer
+        found = []
+
+        @ctypes.WINFUNCTYPE(W_.BOOL, W_.HWND, W_.LPARAM)
+        def enum(hw, lp):
+            if u32.FindWindowExW(hw, None, "SHELLDLL_DefView", None):
+                ww = u32.FindWindowExW(None, hw, "WorkerW", None)
+                if ww:
+                    found.append(ww)
+            return True
+        u32.EnumWindows(enum, 0)
+        self._enum_cb = enum
+        defview = u32.FindWindowExW(progman, None, "SHELLDLL_DefView", None)
+        self.dk = dict(u32=u32, hwnd=hwnd, progman=progman, found=found, defview=defview, w=w, h=h)
+        print("[wallpaper] screen", w, h, "hwnd", hwnd, "progman", progman, "classic WorkerW", found,
+              "DefView in Progman", defview, flush=True)
+        forced = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--strategy=")), None)
+        self.strategies = [forced] if forced else (["classic"] if found else []) + ["behind_icons", "above_icons", "bottom"]
+        self.strat_i = 0
+        self.apply_strategy(self.strategies[0])
+
+    def _set_style(self, child):
+        u32, hwnd = self.dk["u32"], self.dk["hwnd"]
+        GWL_STYLE, WS_CHILD, WS_POPUP = -16, 0x40000000, 0x80000000
+        style = u32.GetWindowLongW(hwnd, GWL_STYLE) & 0xFFFFFFFF
+        new = ((style & ~WS_POPUP) | WS_CHILD) if child else ((style & ~WS_CHILD) | WS_POPUP)
+        u32.SetWindowLongW(hwnd, GWL_STYLE, new - (1 << 32) if new >= 1 << 31 else new)
+
+    def apply_strategy(self, name):
+        d = self.dk
+        u32, hwnd, w, h = d["u32"], d["hwnd"], d["w"], d["h"]
+        SWP = 0x0010 | 0x0040 | 0x0020              # NOACTIVATE | SHOWWINDOW | FRAMECHANGED
+        print("[wallpaper] trying strategy:", name, flush=True)
+        if name == "classic" and d["found"]:
+            self._set_style(True)
+            u32.SetParent(hwnd, d["found"][0])
+            u32.SetWindowPos(hwnd, None, 0, 0, w, h, SWP)
+        elif name == "behind_icons":                # Windows 11 24H2+: between wallpaper layer and icons
+            self._set_style(True)
+            u32.SetParent(hwnd, d["progman"])
+            u32.SetWindowPos(hwnd, d["defview"] or 1, 0, 0, w, h, SWP)
+        elif name == "above_icons":                 # visible, but draws over the icons
+            self._set_style(True)
+            u32.SetParent(hwnd, d["progman"])
+            u32.SetWindowPos(hwnd, None, 0, 0, w, h, SWP)
+        else:                                       # "bottom": ordinary borderless window at the bottom of the stack
+            u32.SetParent(hwnd, None)
+            self._set_style(False)
+            GWL_EXSTYLE = -20
+            ex = u32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
+            u32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | 0x80 | 0x08000000)   # TOOLWINDOW | NOACTIVATE
+            u32.SetWindowPos(hwnd, 1, 0, 0, w, h, SWP)
+        u32.ShowWindow(hwnd, 5)
+
+    def verify_wallpaper(self):
+        """Looks at real screen pixels: are our (pink) window headers actually showing? If not, try the next way."""
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grab()
+            exp = rgb(self.C(self.accent))
+            ok = False
+            for n in ("primary", "audio", "clock"):
+                x0, y0, x1, y1 = self.R[n]
+                px = img.getpixel((int(x0 + (x1 - x0) * .55), int(y0 + 3 * self.u)))[:3]
+                ok = ok or all(abs(px[i] - exp[i]) < 40 for i in range(3))
+        except Exception as e:
+            print("[wallpaper] verify error:", repr(e), flush=True)
+            return
+        name = self.strategies[self.strat_i]
+        if ok:
+            print("[wallpaper] VISIBLE using strategy:", name, flush=True)
+            return
+        print("[wallpaper] not visible with:", name, flush=True)
+        if self.strat_i + 1 < len(self.strategies):
+            self.strat_i += 1
+            self.dk["u32"].SetParent(self.dk["hwnd"], None)
+            self.apply_strategy(self.strategies[self.strat_i])
+            self.root.after(2500, self.verify_wallpaper)
+        else:
+            print("[wallpaper] no strategy worked", flush=True)
+
+    def poll_desktop_input(self):
+        """The desktop swallows mouse/keyboard, so read the cursor and global hotkeys (Ctrl+Alt+key) directly."""
+        import ctypes
+        from ctypes import wintypes
+        u32 = ctypes.windll.user32
+        pt = wintypes.POINT()
+        u32.GetCursorPos(ctypes.byref(pt))
+        if (pt.x, pt.y) != self.last_cursor:
+            self.last_cursor = (pt.x, pt.y)
+            self.on_motion(type("E", (), {"x": pt.x, "y": pt.y})())
+        mod = (u32.GetAsyncKeyState(0x11) & 0x8000) and (u32.GetAsyncKeyState(0x12) & 0x8000)
+        keys = {0x4D: self.toggle_mute, 0x4E: self.next_scene, 0x47: lambda: self.trigger_glitch(True),
+                0x54: lambda: self.start_event("takeover"), 0x49: lambda: self.start_event("infection"),
+                0x56: lambda: self.start_event("visitor"), 0x51: self.quit}
+        for vk, fn in keys.items():
+            down = bool(mod and (u32.GetAsyncKeyState(vk) & 0x8000))
+            if down and not self.hk_state.get(vk):
+                fn()
+            self.hk_state[vk] = down
+
     # ---------------------------------------------------------------- utility
     def C(self, h):
         b = self.s["brightness"] / 100.0
@@ -654,6 +990,9 @@ class App:
     def first_layout(self):
         self.layout()
         self.sfx.play("boot")
+        self.music.start()
+        if self.wallpaper:
+            self.root.after(2500, self.verify_wallpaper)
         self.tick()
 
     def on_configure(self, e):
@@ -707,7 +1046,7 @@ class App:
         self.wide, self.u, self.R, self.ws = self.compute_rects(W, H)
         u = self.u
         self.laid_out = True
-        self.char = {}
+        self._float_off = 0
 
         self.draw_background(W, H)
         self.draw_bars(W, H)
@@ -771,7 +1110,29 @@ class App:
         self.ids["gear"] = self.txt(W - pad - 4 * u, sy, "⚙", 15, MUTED, anchor="e")
         gb = self.cv.bbox(self.ids["gear"])
         self.gear_box = gb
-        self.txt(gb[0] - 12 * u, sy, "CAPRI / ALWAYS ONLINE", 9, MUTED, anchor="e")
+        lt = self.txt(gb[0] - 12 * u, sy, "CAPRI / ALWAYS ONLINE", 9, MUTED, anchor="e")
+        lb = self.cv.bbox(lt)
+        self.ids["mute"] = self.txt(lb[0] - 14 * u, sy, "", 9, MUTED, anchor="e")
+        self.set_mute_icon()
+
+    def set_mute_icon(self):
+        on = self.s["sfx"]
+        self.cv.itemconfig(self.ids["mute"], text="♪" if on else "♪✕", fill=self.C(self.green if on else self.accent))
+        bb = self.cv.bbox(self.ids["mute"])
+        pad = 5 * self.u
+        self.mute_box = (bb[0] - pad, bb[1] - pad, bb[2] + pad, bb[3] + pad)
+
+    def toggle_mute(self):
+        self.s["sfx"] = not self.s["sfx"]
+        self.sfx.stop_all() if not self.s["sfx"] else None
+        self.music.set_muted(not self.s["sfx"])
+        self.set_mute_icon()
+        if "sfx" in getattr(self, "vars", {}):
+            self.vars["sfx"].set(self.s["sfx"])
+        self.save()
+
+    def in_box(self, box, x, y):
+        return box[0] <= x <= box[2] and box[1] <= y <= box[3]
 
     def set_top_status(self, glitch):
         a, b = ("SIGNAL INTERFERENCE", "▱ ▰ ▱") if glitch else ("LINK ESTABLISHED", "▰ ▰ ▰")
@@ -1157,7 +1518,7 @@ class App:
         title = "CAPRI HAS THE KEYS."
         shown = title[:int(el * 20)]
         T(x0 + m, y0 + 49 * u, shown, 23, "#ffe6f1", True)
-        intro = "> Привет. Я немного побуду здесь."
+        intro = "> Hi. I'll stay here for a bit."
         T(x0 + m, y0 + 84 * u, intro[:max(0, int((el - 1) * 25))], 12, self.accent)
         right = x0 + w * .54
         if el > 2:
@@ -1165,7 +1526,7 @@ class App:
             T(right, y0 + h * .61, "NOT A BUG. A VISITOR.", 11, self.green)
             for i, line in enumerate(self.ev["quote"]):
                 T(right, y0 + h * .70 + i * 21 * u, line[:max(0, int((el - 2.4) * 20) - i * 20)], 12, "#f7ccde")
-        T(right, y1 - 29 * u, "[ decorating your terminal... ]" if el < 9 else "[ возвращаю управление. почти. ]", 9,
+        T(right, y1 - 29 * u, "[ decorating your terminal... ]" if el < 9 else "[ giving control back. almost. ]", 9,
           "#739784")
         cw = self.F(23, True).measure("M")
         cx = x0 + m + min(len(title), int(el * 20)) * cw
@@ -1610,7 +1971,6 @@ class App:
         self.glitch_left = .11 + random.random() * .14
         self.glitch_seed = random.random()
         self.set_top_status(True)
-        self.sfx.play("glitch", cooldown=.15)
 
     def clear_glitch(self):
         self.glitch_left = 0
@@ -1647,13 +2007,19 @@ class App:
             dt = min(t0 - self.last, .1) if self.last else 1 / FPS
             self.last = t0
             try:
+                self.music.update()
+                if self.wallpaper:
+                    self.poll_desktop_input()
                 self.update(dt)
             except tk.TclError:
                 return
         else:
             self.last = None
         delay = max(1, int(1000 / FPS - (time.perf_counter() - t0) * 1000))
-        self.root.after(delay, self.tick)
+        try:
+            self.root.after(delay, self.tick)
+        except tk.TclError:
+            pass
 
     def update(self, dt):
         s = self.s
@@ -1719,7 +2085,8 @@ class App:
         over_vis = self.ev and self.ev["kind"] == "visitor" and self.point_in_visitor(e.x, e.y)
         gx0, gy0, gx1, gy1 = self.gear_box
         over_gear = gx0 <= e.x <= gx1 and gy0 <= e.y <= gy1
-        self.cv.configure(cursor="hand2" if (h or over_vis or over_gear) else "arrow")
+        over_mute = self.in_box(self.mute_box, e.x, e.y)
+        self.cv.configure(cursor="hand2" if (h or over_vis or over_gear or over_mute) else "arrow")
 
     def point_in_visitor(self, x, y):
         b = getattr(self, "vis_box", None)
@@ -1729,6 +2096,9 @@ class App:
         gx0, gy0, gx1, gy1 = self.gear_box
         if gx0 <= e.x <= gx1 and gy0 <= e.y <= gy1:
             self.toggle_settings()
+            return
+        if self.in_box(self.mute_box, e.x, e.y):
+            self.toggle_mute()
             return
         if self.ev and self.ev["kind"] == "visitor" and self.point_in_visitor(e.x, e.y):
             self.sfx.play("click")
@@ -1756,7 +2126,7 @@ class App:
             if self.start_event({"t": "takeover", "i": "infection", "v": "visitor"}[ch]):
                 self.sfx.play("click")
         elif ch == "m":
-            self.s["sfx"] = not self.s["sfx"]
+            self.toggle_mute()
         elif ch == "a":
             self.demo_audio = not self.demo_audio
         elif e.keysym == "F11":
@@ -1790,7 +2160,7 @@ class App:
     def build_settings(self):
         w = tk.Toplevel(self.root)
         self.settings_win = w
-        w.title("NEON PROTOCOL / НАСТРОЙКИ")
+        w.title("NEON PROTOCOL / SETTINGS")
         w.configure(bg="#110b14", padx=14, pady=10)
         w.attributes("-topmost", True)
         w.protocol("WM_DELETE_WINDOW", w.withdraw)
@@ -1804,6 +2174,12 @@ class App:
                 self.s[key] = type(DEFAULTS[key])(v) if not isinstance(DEFAULTS[key], bool) else bool(v)
                 if key in relayout and key != "livingmask":
                     self.root.after(30, self.layout)
+                if key == "musicvolume":
+                    self.music.set_volume()
+                if key == "sfx":
+                    self.sfx.stop_all() if not self.s["sfx"] else None
+                    self.music.set_muted(not self.s["sfx"])
+                    self.set_mute_icon()
                 if key == "glitch" and not self.s["glitch"]:
                     self.clear_glitch()
                 self.save()
@@ -1843,44 +2219,85 @@ class App:
             b.configure(command=pick)
             b.pack(side="right")
 
-        tk.Label(w, text="NEON PROTOCOL / НАСТРОЙКИ", bg="#110b14", fg=self.green, font=(self.family, 11, "bold")
+        tk.Label(w, text="NEON PROTOCOL / SETTINGS", bg="#110b14", fg=self.green, font=(self.family, 11, "bold")
                  ).pack(anchor="w", pady=(0, 6))
-        scale("glitch", "Глитчи", 0, 100)
-        scale("codespeed", "Скорость кода", 0, 200)
-        scale("brightness", "Яркость", 30, 120)
-        scale("sensitivity", "Реакция на звук", 0, 200)
-        color("accent", "Розовый акцент")
-        color("secondary", "Зелёный акцент")
-        check("parallax", "Параллакс мыши")
-        check("scanlines", "Полосы CRT")
-        check("showclock", "Часы и календарь")
-        check("slideshow", "Смена кадров раз в минуту")
-        tk.Label(w, text="GHOST INSIDE / ПРИСУТСТВИЕ КАПРИ", bg="#110b14", fg=self.green, font=fnt
+        scale("glitch", "Glitches", 0, 100)
+        scale("codespeed", "Code speed", 0, 200)
+        scale("brightness", "Brightness", 30, 120)
+        scale("sensitivity", "Audio reaction", 0, 200)
+        color("accent", "Pink accent")
+        color("secondary", "Green accent")
+        check("parallax", "Mouse parallax")
+        check("scanlines", "CRT scanlines")
+        check("showclock", "Clock and calendar")
+        check("slideshow", "Change frames every minute")
+        tk.Label(w, text="GHOST INSIDE / CAPRI'S PRESENCE", bg="#110b14", fg=self.green, font=fnt
                  ).pack(anchor="w", pady=(10, 2))
-        check("livingmask", "Живая маска и взгляд")
-        check("takeover", "Перехваты терминала")
-        check("infection", "Зелёное заражение окон")
-        check("visitor", "Аватар выходит из окон")
-        check("memories", "Восстановление воспоминаний")
-        check("musicmood", "Настроение под музыку")
-        scale("eventrate", "Частота событий (0 — вручную)", 0, 100)
-        tk.Label(w, text="ЗВУК", bg="#110b14", fg=self.green, font=fnt).pack(anchor="w", pady=(10, 2))
-        check("sfx", "Звуковые эффекты (M)")
-        scale("sfxvolume", "Громкость эффектов (pygame)", 0, 100)
+        check("livingmask", "Living mask and gaze")
+        check("takeover", "Terminal takeovers")
+        check("infection", "Green window infection")
+        check("visitor", "Avatar leaves the windows")
+        check("memories", "Memory restoration")
+        check("musicmood", "Mood follows music")
+        scale("eventrate", "Event frequency (0 = manual)", 0, 100)
+        tk.Label(w, text="SOUND / MUSIC", bg="#110b14", fg=self.green, font=fnt).pack(anchor="w", pady=(10, 2))
+        check("sfx", "Sound: music and effects (M)")
+        scale("sfxvolume", "Effects volume", 0, 100)
+        scale("musicvolume", "Music volume", 0, 100)
+        def pick_music():
+            from tkinter import filedialog
+            f = filedialog.askopenfilename(parent=w, title="Background music",
+                                           filetypes=[("Audio", "*.mp3 *.mpeg *.mpg *.mp2 *.wav *.ogg *.flac"), ("All", "*.*")])
+            if f:
+                self.s["musicfile"] = f
+                self.save()
+                self.music.start()
+                mus_lbl.configure(text=self.music.status)
+
+        def music_folder():
+            from tkinter import filedialog
+            d = filedialog.askdirectory(parent=w, title="Choose a music folder")
+            if d:
+                self.s["musicdir"] = d
+                self.s["musicfile"] = ""
+                self.save()
+                self.music.start()
+                mus_lbl.configure(text=self.music.status)
+
+        def music_default():
+            self.s["musicdir"] = ""
+            self.s["musicfile"] = ""
+            self.save()
+            self.music.start()
+            mus_lbl.configure(text=self.music.status)
+
+        mf = tk.Frame(w, bg="#110b14")
+        mf.pack(fill="x", pady=2)
+        tk.Button(mf, text="Music: choose file…", command=pick_music, bg="#1b1020", fg=self.green,
+                  relief="flat", font=fnt).pack(side="left")
+        tk.Button(mf, text="Folder…", command=music_folder, bg="#1b1020", fg=self.green,
+                  relief="flat", font=fnt).pack(side="left", padx=4)
+        tk.Button(mf, text="Default", command=music_default, bg="#1b1020", fg=self.green,
+                  relief="flat", font=fnt).pack(side="left")
+        tk.Button(mf, text="⏭", command=lambda: (self.music.next(), mus_lbl.configure(text=self.music.status)),
+                  bg="#1b1020", fg=self.green, relief="flat", font=fnt).pack(side="left")
+        mus_lbl = tk.Label(w, text=self.music.status, bg="#110b14", fg="#956e80", wraplength=330, justify="left",
+                           font=(self.family, 8), anchor="w")
+        mus_lbl.pack(fill="x")
         row = tk.Frame(w, bg="#110b14")
         row.pack(fill="x", pady=(10, 2))
-        for text, cmd in (("Перехват", lambda: self.start_event("takeover")),
-                          ("Импульс", lambda: self.start_event("infection")),
-                          ("Позвать Капри", lambda: self.start_event("visitor"))):
+        for text, cmd in (("Takeover", lambda: self.start_event("takeover")),
+                          ("Pulse", lambda: self.start_event("infection")),
+                          ("Call Capri", lambda: self.start_event("visitor"))):
             tk.Button(row, text=text, command=cmd, bg="#1b1020", fg=self.green, relief="flat", font=fnt
                       ).pack(side="left", expand=True, fill="x", padx=2)
         row2 = tk.Frame(w, bg="#110b14")
         row2.pack(fill="x", pady=2)
-        tk.Button(row2, text="Следующий кадр", command=self.next_scene, bg="#1b1020", fg=self.green, relief="flat",
+        tk.Button(row2, text="Next frame", command=self.next_scene, bg="#1b1020", fg=self.green, relief="flat",
                   font=fnt).pack(side="left", expand=True, fill="x", padx=2)
-        tk.Button(row2, text="Сбросить", command=self.reset_settings, bg="#1b1020", fg=self.green, relief="flat",
+        tk.Button(row2, text="Reset", command=self.reset_settings, bg="#1b1020", fg=self.green, relief="flat",
                   font=fnt).pack(side="left", expand=True, fill="x", padx=2)
-        tk.Label(w, text="O настройки · N кадр · G глитч · T перехват · I импульс\nV позвать Капри · M звук · A демо-аудио · F11 экран",
+        tk.Label(w, text="O settings · N next frame · G glitch · T takeover · I pulse\nV call Capri · M sound · A demo audio · F11 fullscreen",
                  bg="#110b14", fg="#956e80", font=(self.family, 8), justify="left").pack(anchor="w", pady=(8, 0))
 
     def reset_settings(self):
@@ -1894,6 +2311,7 @@ class App:
 
     def quit(self):
         self.save()
+        self.music.shutdown()
         self.root.destroy()
 
     def run(self):
@@ -1901,4 +2319,15 @@ class App:
 
 
 if __name__ == "__main__":
-    App(fullscreen="--fullscreen" in sys.argv).run()
+    if sys.platform == "win32":
+        try:      # crisp, correctly sized window on high-DPI screens
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+    if "--wallpaper" in sys.argv:      # pythonw has no console: keep a log next to the script
+        try:
+            sys.stdout = sys.stderr = open(os.path.join(BASE, "caprion_wallpaper.log"), "w", encoding="utf-8")
+        except Exception:
+            pass
+    App(fullscreen="--fullscreen" in sys.argv, wallpaper="--wallpaper" in sys.argv).run()
