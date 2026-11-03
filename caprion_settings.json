@@ -1,0 +1,21 @@
+{
+ "glitch": 28,
+ "codespeed": 55,
+ "brightness": 90,
+ "sensitivity": 100,
+ "accent": "#ff205f",
+ "secondary": "#00ef72",
+ "parallax": true,
+ "scanlines": true,
+ "showclock": true,
+ "slideshow": true,
+ "livingmask": true,
+ "takeover": true,
+ "infection": true,
+ "visitor": true,
+ "memories": true,
+ "musicmood": true,
+ "eventrate": 50,
+ "sfx": true,
+ "sfxvolume": 60
+}
